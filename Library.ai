@@ -450,10 +450,12 @@
         end
 
         function Library:Resizify(Parent)
+            local Grip = Library.Mobile and 24 or 10
+
             local Resizing = Library:Create("TextButton", {
-                Position = dim2(1, -10, 1, -10);
+                Position = dim2(1, -Grip, 1, -Grip);
                 BorderColor3 = rgb(0, 0, 0);
-                Size = dim2(0, 10, 0, 10);
+                Size = dim2(0, Grip, 0, Grip);
                 BorderSizePixel = 0;
                 BackgroundColor3 = rgb(255, 255, 255);
                 Parent = Parent;
@@ -468,7 +470,7 @@
             local Target = Parent.Size
 
             Resizing.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(input) then
                     IsResizing = true
                     InputLost = input.Position
                     Size = Parent.Size
@@ -477,13 +479,13 @@
             end)
 
             Resizing.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(input) then
                     IsResizing = false
                 end
             end)
 
             Library:Connection(InputService.InputChanged, function(input)
-                if not IsResizing or input.UserInputType ~= Enum.UserInputType.MouseMovement then
+                if not (IsResizing and Library:IsMove(input)) then
                     return
                 end
 
@@ -507,23 +509,50 @@
             end)
         end
 
-        function Library:Hovering(Object)
-            if type(Object) == "table" then 
-                local Pass = false;
+        -- Touch devices have no mouse, every click / drag check goes through these.
+        Library.Mobile = InputService.TouchEnabled and not InputService.MouseEnabled
 
-                for _,obj in Object do 
-                    if Library:Hovering(obj) then 
-                        Pass = true
-                        return Pass
-                    end 
-                end 
-            else 
-                local y_cond = Object.AbsolutePosition.Y <= Mouse.Y and Mouse.Y <= Object.AbsolutePosition.Y + Object.AbsoluteSize.Y
-                local x_cond = Object.AbsolutePosition.X <= Mouse.X and Mouse.X <= Object.AbsolutePosition.X + Object.AbsoluteSize.X
-                
-                return (y_cond and x_cond)
-            end 
-        end  
+        function Library:IsClick(input)
+            local Type = input.UserInputType
+
+            return Type == Enum.UserInputType.MouseButton1 or Type == Enum.UserInputType.Touch
+        end
+
+        function Library:IsMove(input)
+            local Type = input.UserInputType
+
+            return Type == Enum.UserInputType.MouseMovement or Type == Enum.UserInputType.Touch
+        end
+
+        function Library:Cursor()
+            if Library.Mobile then
+                local Location = InputService:GetMouseLocation()
+
+                return Location.X, Location.Y - gui_offset
+            end
+
+            return Mouse.X, Mouse.Y
+        end
+
+        function Library:Hovering(Object)
+            if type(Object) == "table" then
+                for _,obj in Object do
+                    if Library:Hovering(obj) then
+                        return true
+                    end
+                end
+
+                return false
+            end
+
+            local X, Y = Library:Cursor()
+            local Position, Size = Object.AbsolutePosition, Object.AbsoluteSize
+
+            local y_cond = Position.Y <= Y and Y <= Position.Y + Size.Y
+            local x_cond = Position.X <= X and X <= Position.X + Size.X
+
+            return (y_cond and x_cond)
+        end
 
         function Library:ConvertHex(color)
             local r = math.floor(color.R * 255)
@@ -547,7 +576,7 @@
             local Target = Parent.Position
 
             Parent.InputBegan:Connect(function(Input)
-                if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(Input) then
                     Dragging = true
                     InitialPosition = Input.Position
                     InitialSize = Parent.Position
@@ -556,13 +585,13 @@
             end)
 
             Parent.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(input) then
                     Dragging = false
                 end
             end)
 
             Library:Connection(InputService.InputChanged, function(Input)
-                if not Dragging or Input.UserInputType ~= Enum.UserInputType.MouseMovement then
+                if not (Dragging and Library:IsMove(Input)) then
                     return
                 end
 
@@ -1201,19 +1230,19 @@
             end)
 
             InputService.InputChanged:Connect(function(input)
-                if (DraggingSat or DraggingHue or DraggingAlpha) and input.UserInputType == Enum.UserInputType.MouseMovement then
+                if (DraggingSat or DraggingHue or DraggingAlpha) and Library:IsMove(input) then
                     Cfg.UpdateColor() 
                 end
             end)
 
             Library:Connection(InputService.InputBegan, function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 and not Library:Hovering({Items.Colorpicker, Items.Animations.Items.DropdownElements}) and Items.Colorpicker.Visible then
+                if Library:IsClick(input) and not Library:Hovering({Items.Colorpicker, Items.Animations.Items.DropdownElements}) and Items.Colorpicker.Visible then
                     Cfg.SetVisible(false)
                 end
             end) 
 
             Library:Connection(InputService.InputEnded, function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(input) then
                     DraggingSat = false
                     DraggingHue = false
                     DraggingAlpha = false
@@ -1392,10 +1421,11 @@
     -- List Library 
         function Library:StatusList(properties)
             local Cfg = {
-                Name = properties.Name or "List"; 
+                Name = properties.Name or "List";
+                Position = properties.Position or dim2(0, 10, 0, 10);
 
                 Items = {}
-            } 
+            }
 
             local Items = Cfg.Items; do 
                 -- Top
@@ -1515,7 +1545,7 @@
             end)
 
             task.delay(0.01, function()
-                Items.List.Position = dim2(0, 50, 0, 700);
+                Items.List.Position = Cfg.Position
             end)
             
             return setmetatable(Cfg, Library)
@@ -1527,11 +1557,14 @@
                 Items = {}
             } 
 
-            local Items = Cfg.Items; do     
-                Items.Outline = Library:Create( "Frame", {
+            local Items = Cfg.Items; do
+                -- A button so the entry can be tapped on touch devices.
+                Items.Outline = Library:Create( "TextButton", {
                     Parent = self.Items.Holder;
                     Size = dim2(1, 0, 0, 20);
                     Name = "\0";
+                    Active = true;
+                    Selectable = false;
                     Position = dim2(0, 0, 0, 0);
                     BorderColor3 = rgb(0, 0, 0);
                     BorderSizePixel = 0;
@@ -1616,16 +1649,27 @@
                 });
             end 
 
-            function Cfg.SetVisible(bool) 
-                Items.Outline.Visible = bool 
-            end 
+            function Cfg.SetVisible(bool)
+                Items.Outline.Visible = bool
+            end
 
             function Cfg.SetText(string)
                 Items.Title.Text = string
-            end 
-        
+            end
+
+            -- Accent while on so the state reads at a glance without the menu.
+            function Cfg.SetActive(bool)
+                Items.Title.TextColor3 = bool and themes.preset.accent or themes.preset.unselected
+            end
+
+            function Cfg.Bind(callback)
+                Items.Outline.MouseButton1Click:Connect(callback)
+            end
+
+            Cfg.SetActive(false)
+
             return setmetatable(Cfg, Library)
-        end 
+        end
     -- 
 
     -- Image Holders 
@@ -1895,7 +1939,7 @@
                 DisplayOrder = 100;
             }); 
 
-            Library.KeybindList = Library:StatusList({Name = "Keybinds"})
+            Library.KeybindList = Library:StatusList({Name = "Keybinds", Position = dim2(0, 10, 0, 40)})
 
             local Items = Cfg.Items; do
                 -- Items 
@@ -2026,10 +2070,51 @@
                     return
                 end
 
+                Cfg.Visible = bool
                 Items.Holder.Visible = bool
 
                 Cfg.Tween(bool)
-            end 
+            end
+
+            function Cfg.Toggle()
+                Cfg.SetVisible(not Cfg.Visible)
+            end
+
+            -- Mobile has no keyboard, so a backpack tool always toggles the menu.
+            function Cfg.CreateToggleTool()
+                local Backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+
+                if not Backpack then
+                    return
+                end
+
+                if Cfg.ToggleTool then
+                    Cfg.ToggleTool:Destroy()
+                end
+
+                Cfg.ToggleTool = Library:Create( "Tool" , {
+                    Name = "Toggle Ui";
+                    ToolTip = "Toggles the menu";
+                    RequiresHandle = false;
+                    CanBeDropped = false;
+                    Parent = Backpack
+                })
+
+                -- Equipping and unequipping both toggle, so one hotbar tap is enough.
+                Library:Connection(Cfg.ToggleTool.Equipped, Cfg.Toggle)
+                Library:Connection(Cfg.ToggleTool.Unequipped, Cfg.Toggle)
+            end
+
+            -- The backpack is rebuilt on respawn, so the tool is handed back out.
+            Library:Connection(LocalPlayer.CharacterAdded, function()
+                task.wait(.5)
+                Cfg.CreateToggleTool()
+            end)
+
+            task.spawn(function()
+                LocalPlayer:WaitForChild("Backpack", 10)
+                Cfg.CreateToggleTool()
+            end)
 
             function Cfg.Tween(bool) 
                 if Library.Tweening then 
@@ -2088,6 +2173,16 @@
                 Items = {};
                 Tweening = false;
             }
+
+            -- Phone screens are smaller than the default panel size.
+            local Viewport = Camera.ViewportSize
+
+            Cfg.Size = dim2(
+                Cfg.Size.X.Scale,
+                math.min(Cfg.Size.X.Offset, Viewport.X - 20),
+                Cfg.Size.Y.Scale,
+                math.min(Cfg.Size.Y.Offset, Viewport.Y - 60)
+            )
 
             local Items = Cfg.Items; do
                 -- Window 
@@ -3057,7 +3152,7 @@
             end)
 
             Library:Connection(InputService.InputChanged, function(input)
-                if Cfg.Dragging and input.UserInputType == Enum.UserInputType.MouseMovement then 
+                if Cfg.Dragging and Library:IsMove(input) then 
                     local Size = (input.Position.X - Items.Outline.AbsolutePosition.X) / Items.Outline.AbsoluteSize.X
                     local Value = ((Cfg.Max - Cfg.Min) * Size) + Cfg.Min
                     Cfg.Set(Value)
@@ -3065,7 +3160,7 @@
             end)
 
             Library:Connection(InputService.InputEnded, function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(input) then
                     Cfg.Dragging = false
                 end 
             end)
@@ -3263,7 +3358,7 @@
             end)
 
             Library:Connection(InputService.InputChanged, function(input)
-                if Items.Tooltip.Visible and input.UserInputType == Enum.UserInputType.MouseMovement and Library:Hovering(Items.Tooltip) then 
+                if Items.Tooltip.Visible and Library:IsMove(input) and Library:Hovering(Items.Tooltip) then 
                     Library:Tween(Items.Outline, {
                         Position = dim_offset(input.Position.X, input.Position.Y + 86)
                     }, Library:GetDragInfo())
@@ -3776,7 +3871,7 @@
             end)
 
             Library:Connection(InputService.InputBegan, function(input, game_event)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(input) then
                     if not Library:Hovering({Items.DropdownElements, Items.Dropdown}) then
                         Cfg.SetVisible(false)
                         Cfg.Open = false
@@ -4072,6 +4167,16 @@
 
             local KeybindElement = Library.KeybindList:ListElement({})
 
+            -- Every keybind sits in the top list, tapping it toggles without the menu.
+            KeybindElement.Bind(function()
+                if Cfg.Mode == "Always" then
+                    return
+                end
+
+                Cfg.Active = not Cfg.Active
+                Cfg.Set(Cfg.Active)
+            end)
+
             local Items = Cfg.Items; do 
                 -- Component
                     Items.Keybind = Library:Create( "TextButton" , {
@@ -4176,8 +4281,8 @@
                             Cfg.Set(option)
                         end
                     end, Default = Cfg.Mode, Flag = Cfg.Flag .. "_MODE"})
-                    Section:Toggle({Name = "Show on list", Flag = Cfg.Flag .. "_LIST", Callback = function()
-                        KeybindElement.SetVisible(Flags[Cfg.Flag .. "_LIST"] and Cfg.Active or false)
+                    Section:Toggle({Name = "Show on list", Default = true, Flag = Cfg.Flag .. "_LIST", Callback = function(bool)
+                        KeybindElement.SetVisible(bool)
                     end})
                 --
             end 
@@ -4240,7 +4345,8 @@
                 }
                 
                 KeybindElement.SetText(string.format("%s [%s] - %s", Cfg.Name, __text, Cfg.Mode))
-                KeybindElement.SetVisible(Flags[Cfg.Flag .. "_LIST"] and Cfg.Active or false)
+                KeybindElement.SetActive(Cfg.Active)
+                KeybindElement.SetVisible(Flags[Cfg.Flag .. "_LIST"] ~= false)
             end
 
             function Cfg.SetVisible(bool)
@@ -4292,7 +4398,7 @@
             end)
 
             Library:Connection(InputService.InputBegan, function(input, game_event) 
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if Library:IsClick(input) then
                     if not (Library:Hovering(Items.Dropdown.Items.DropdownElements) or Library:Hovering(Items.Information)) and Items.Information.Visible then
                         Cfg.SetVisible(false)
                         Cfg.Open = false;
@@ -4816,9 +4922,9 @@
                 Section:Toggle({Name = "Toggle Watermark", Callback = function(bool)
                     Window.SetWatermarkVisible(bool)
                 end})
-                Section:Toggle({Name = "Toggle Keybind List", Callback = function(bool)
-                    Library.KeybindList.Items.Holder.Visible = bool 
-                    Library.KeybindList.Items.List.Visible = bool 
+                Section:Toggle({Name = "Toggle Keybind List", Default = true, Callback = function(bool)
+                    Library.KeybindList.Items.Holder.Visible = bool
+                    Library.KeybindList.Items.List.Visible = bool
                 end})
                 Section:Textbox({Name = "Custom Menu Name", Default = Window.Name, Callback = function(text)
                     Window.Name = text
@@ -6072,7 +6178,7 @@
                 end 
 
                 Elements.Text.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+                    if Library:IsClick(input) then 
                         Elements.Text.Parent = Library.Items 
 
                         TextDragging = true
@@ -6080,7 +6186,7 @@
                 end)
 
                 Elements.Text.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if Library:IsClick(input) then
                         local Parent = Math:FindClosestFrame(vec2(input.Position.X, input.Position.Y - 36))
                         local ParentIsHolder = Parent == "ElementHolder"
 
@@ -6091,7 +6197,7 @@
                 end)
 
                 Elements.Type.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+                    if Library:IsClick(input) then 
                         Elements.Text.Parent = Library.Items 
                         Elements.Type.Parent = Library.Other 
 
@@ -6110,7 +6216,7 @@
                 end)
 
                 Elements.Type.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if Library:IsClick(input) then
                         local Parent = Math:FindClosestFrame(vec2(input.Position.X, input.Position.Y - 36))
 
                         local ParentIsHolder = Parent == "ElementHolder"
@@ -6121,7 +6227,7 @@
                 end)
                 
                 Library:Connection(InputService.InputChanged, function(input, game_event) 
-                    if (TextDragging or BarDragging) and input.UserInputType == Enum.UserInputType.MouseMovement then            
+                    if (TextDragging or BarDragging) and Library:IsMove(input) then            
                         Library:Tween(Elements.Text, {
                             Position = dim_offset(input.Position.X, input.Position.Y + 36 + Elements.Text.AbsoluteSize.Y)
                         }, Library:GetDragInfo())
@@ -6129,7 +6235,7 @@
                 end)    
 
                 Library:Connection(InputService.InputEnded, function(input, game_event) 
-                    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2) and Elements.Information.Visible and not (Library:Hovering({Elements.Information}) or Config.DetermineClosing()) then 
+                    if (Library:IsClick(input) or input.UserInputType == Enum.UserInputType.MouseButton2) and Elements.Information.Visible and not (Library:Hovering({Elements.Information}) or Config.DetermineClosing()) then 
                         Config.Tween(false)
                         Config.Open = false
                     end 
@@ -6388,7 +6494,7 @@
                 end 
 
                 Elements.Text.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+                    if Library:IsClick(input) then 
                         Elements.Text.Parent = Library.Items 
 
                         TextDragging = true
@@ -6396,7 +6502,7 @@
                 end)
 
                 Elements.Text.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if Library:IsClick(input) then
                         local Parent = Math:FindClosestFrame(vec2(input.Position.X, input.Position.Y - 36))
                         local ParentIsHolder = Parent == "ElementHolder"
 
@@ -6407,7 +6513,7 @@
                 end)
 
                 Elements.Name.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+                    if Library:IsClick(input) then 
                         Elements.Text.Parent = Library.Items 
                         Elements.Name.Parent = Library.Other 
 
@@ -6426,7 +6532,7 @@
                 end)
 
                 Elements.Name.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if Library:IsClick(input) then
                         local Parent = Math:FindClosestFrame(vec2(input.Position.X, input.Position.Y - 36))
                         local ParentIsHolder = Parent == "ElementHolder"
 
@@ -6436,7 +6542,7 @@
                 end)
                 
                 Library:Connection(InputService.InputChanged, function(input, game_event) 
-                    if (TextDragging or BarDragging) and input.UserInputType == Enum.UserInputType.MouseMovement then            
+                    if (TextDragging or BarDragging) and Library:IsMove(input) then            
                         Library:Tween(Elements.Text, {
                             Position = dim_offset(input.Position.X, input.Position.Y + 36 + Elements.Text.AbsoluteSize.Y)
                         }, Library:GetDragInfo())
@@ -6444,7 +6550,7 @@
                 end)    
 
                 Library:Connection(InputService.InputEnded, function(input, game_event) 
-                    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2) and Elements.Information.Visible and not (Library:Hovering({Elements.Information}) or Config.DetermineClosing()) then 
+                    if (Library:IsClick(input) or input.UserInputType == Enum.UserInputType.MouseButton2) and Elements.Information.Visible and not (Library:Hovering({Elements.Information}) or Config.DetermineClosing()) then 
                         Config.Tween(false)
                         Config.Open = false
                     end 
@@ -7040,7 +7146,7 @@
                 end 
 
                 Elements.Text.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+                    if Library:IsClick(input) then 
                         Elements.Text.Parent = Library.Items 
 
                         TextDragging = true
@@ -7048,7 +7154,7 @@
                 end)
 
                 Elements.Text.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if Library:IsClick(input) then
                         local Parent = Math:FindClosestFrame(vec2(input.Position.X, input.Position.Y - 36), {Items.Box, Items.ElementHolder}, {"Items.Box", "Items.ElementHolder"})
                         local isHolder = Items[Parent] == Items.ElementHolder
                         
@@ -7059,7 +7165,7 @@
 
                 for _,box in {Elements.Corners, Elements.BoxHolder} do 
                     box.InputBegan:Connect(function(input)
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+                        if Library:IsClick(input) then 
                             Elements.Text.Parent = Library.Items 
                             Elements.BoxHolder.Parent = Library.Other 
                             Elements.Corners.Parent = Library.Other 
@@ -7079,7 +7185,7 @@
                     end)
 
                     box.InputEnded:Connect(function(input)
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        if Library:IsClick(input) then
                             local Parent = Math:FindClosestFrame(vec2(input.Position.X, input.Position.Y - 36), {Items.Box, Items.ElementHolder}, {"Items.Box", "Items.ElementHolder"})
                             local ParentIsHolder = Parent == "ElementHolder"
 
@@ -7090,7 +7196,7 @@
                 end 
 
                 Library:Connection(InputService.InputChanged, function(input, game_event) 
-                    if (TextDragging or BarDragging) and input.UserInputType == Enum.UserInputType.MouseMovement then            
+                    if (TextDragging or BarDragging) and Library:IsMove(input) then            
                         Library:Tween(Elements.Text, {
                             Position = dim_offset(input.Position.X, input.Position.Y + 36 + Elements.Text.AbsoluteSize.Y)
                         }, Library:GetDragInfo())
@@ -7098,7 +7204,7 @@
                 end)    
 
                 Library:Connection(InputService.InputEnded, function(input, game_event) 
-                    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2) and Elements.Information.Visible and not (Library:Hovering({Elements.Information}) or Config.DetermineClosing()) then 
+                    if (Library:IsClick(input) or input.UserInputType == Enum.UserInputType.MouseButton2) and Elements.Information.Visible and not (Library:Hovering({Elements.Information}) or Config.DetermineClosing()) then 
                         Config.Tween(false)
                         Config.Open = false
                     end 
@@ -7147,14 +7253,14 @@
                 local Cache = Angle 
                 
                 Items.ViewportFrame.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if Library:IsClick(input) then
                         Dragging = true
                         MousePos = input.Position
                     end
                 end)
 
                 Items.ViewportFrame.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if Library:IsClick(input) then
                         Dragging = false
                         Cfg.VisualizedModel:SetPrimaryPartCFrame(CFrame.new(Vector3.new(0, Cfg.ModelOffset, -8)) * CFrame.Angles(0, math.rad(-180), 0))
                         Angle = CFrame.Angles(0, math.rad(-180), 0)
@@ -7162,7 +7268,7 @@
                 end)
 
                 InputService.InputChanged:Connect(function(input)
-                    if Dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                    if Dragging and Library:IsMove(input) then
                         local delta = input.Position - MousePos
                         MousePos = input.Position
                         Angle *= CFrame.Angles(0, delta.X * Sensitivity, 0)
